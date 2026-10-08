@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Familia Gweldar</title>
+<style>
+:root{--bg:#f4f1ea;--card:#fff;--tx:#1d1d1f;--mut:#6b6b70;--ac:#c2410c;--bd:#ddd8cc;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#17161a;--card:#232228;--tx:#f1efe9;--mut:#9a98a0;--ac:#fb923c;--bd:#38363f}}
+:root[data-theme="dark"]{--bg:#17161a;--card:#232228;--tx:#f1efe9;--mut:#9a98a0;--ac:#fb923c;--bd:#38363f}
+*{box-sizing:border-box}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+body{margin:0;background:var(--bg);color:var(--tx);font:16px/1.4 system-ui,-apple-system,"Segoe UI",sans-serif}
+main{max-width:900px;margin:0 auto;padding:16px;display:grid;gap:16px}
+h1{margin:0;font-size:26px}h2{margin:0 0 10px;font-size:18px}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:14px;padding:16px}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
+button,input,select{font:inherit;color:inherit}
+input,select{padding:10px;border:1px solid var(--bd);border-radius:10px;background:var(--bg);width:100%}
+button{padding:10px 14px;border:1px solid var(--bd);border-radius:10px;background:var(--bg);cursor:pointer}
+button.p{background:var(--ac);border-color:var(--ac);color:#fff}
+button.on{outline:3px solid var(--ac)}
+.ch{padding:18px 8px;text-align:center;font-size:15px}.ch b{display:block;font-size:34px}
+.mut{color:var(--mut);font-size:14px}.err{color:#dc2626;font-size:14px;min-height:20px}
+ol{margin:0;padding-left:24px}li{padding:3px 0}li span{float:right;font-weight:600}
+.two{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px}
+.hide{display:none}
+</style>
+</head>
+<body>
+<main>
+  <div class="row" style="justify-content:space-between"><h1>👑 Familia Gweldar</h1><div id="who" class="row"></div></div>
+
+  <section id="auth" class="card hide">
+    <h2>Entrar / Crear usuario</h2>
+    <div class="grid"><input id="u" placeholder="Usuario (3-16, letras/números/_)" maxlength="16" autocomplete="username"><input id="pw" type="password" placeholder="Contraseña (mín. 4)" autocomplete="current-password"></div>
+    <div class="row" style="margin-top:10px"><button class="p" id="login">Entrar</button><button id="reg">Crear usuario</button></div>
+    <div class="err" id="err"></div>
+  </section>
+
+  <section id="game" class="card hide">
+    <h2>1. Elige personaje</h2>
+    <div class="grid" id="chars"></div>
+    <h2 style="margin-top:18px">2. Elige acción</h2>
+    <div class="grid" id="acts"></div>
+    <p class="mut" id="msg">Elige un personaje y una acción.</p>
+    <p class="mut" id="mine"></p>
+  </section>
+
+  <section class="two" id="tops">
+    <div class="card"><h2>🏆 Top global · acciones totales</h2><ol id="topT"></ol></div>
+    <div class="card"><h2>🎯 Top global por acción</h2><select id="sel" style="margin-bottom:10px"></select><ol id="topA"></ol></div>
+  </section>
+  <p class="mut" id="status"></p>
+</main>
+
+<script>
+// ====== EDITA AQUÍ TUS ACCIONES (puedes añadir o quitar) ======
+const ACCIONES = ["Acción 1", "Acción 2", "Acción 3", "Acción 4"];
+// ===============================================================
+const PERSONAJES = [
+  {id:"madre", n:"La madre del Gweldar", e:"👩"},
+  {id:"hermana", n:"La hermana del Gweldar", e:"👧"},
+  {id:"abuela", n:"La abuela del Gweldar", e:"👵"},
+  {id:"prima", n:"La prima del Gweldar", e:"💃"}
+];
+const $ = id => document.getElementById(id);
+let players, me = null, myData = null, char = null, all = [];
+
+function el(tag, txt, cls){ const e=document.createElement(tag); if(txt!=null) e.textContent=txt; if(cls) e.className=cls; return e; }
+async function sha(s){
+  const b = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s));
+  return [...new Uint8Array(b)].map(x=>x.toString(16).padStart(2,"0")).join("");
+}
+function save(k,v){ try{ v==null?localStorage.removeItem(k):localStorage.setItem(k,v); }catch(e){} }
+function load(k){ try{ return localStorage.getItem(k); }catch(e){ return null; } }
+
+async function init(){
+  let db = null;
+  try{ db = await claude.use("db"); }catch(e){}
+  if(!db){ $("status").textContent = "La base de datos no está disponible: abre la página con sesión iniciada en claude.ai."; return; }
+  players = db.collection("players");
+  PERSONAJES.forEach(p=>{
+    const b = el("button",null,"ch"); b.append(el("b",p.e), document.createTextNode(p.n));
+    b.onclick = ()=>{ char=p; [...$("chars").children].forEach(x=>x.classList.remove("on")); b.classList.add("on"); $("msg").textContent = "Personaje: "+p.n+". Ahora elige una acción."; };
+    $("chars").append(b);
+  });
+  ACCIONES.forEach((a,i)=>{
+    const b = el("button",a); b.onclick = ()=>doAction(i); $("acts").append(b);
+    const o = el("option",a); o.value=i; $("sel").append(o);
+  });
+  $("sel").onchange = renderTops;
+  $("login").onclick = ()=>auth(false);
+  $("reg").onclick = ()=>auth(true);
+  players.onSnapshot(s=>{
+    all = s.docs.map(d=>({id:d.id, ...d.data()}));
+    if(me){ const m = all.find(x=>x.id===me); if(m){ myData=m; renderMine(); } }
+    renderTops();
+  }, e=>{ $("status").textContent = "Error de base de datos: "+(e&&e.code||""); });
+  const saved = load("gw_user");
+  if(saved){ const d = await players.doc(saved).get(); if(d.exists){ setMe(saved, d.data()); return; } }
+  $("auth").classList.remove("hide");
+}
+
+async function auth(create){
+  const name = $("u").value.trim().toLowerCase(), pw = $("pw").value;
+  $("err").textContent = "";
+  if(!/^[a-z0-9_]{3,16}$/.test(name)) return $("err").textContent = "Usuario no válido (3-16, letras/números/_).";
+  if(pw.length < 4) return $("err").textContent = "La contraseña debe tener al menos 4 caracteres.";
+  try{
+    const ref = players.doc(name), snap = await ref.get();
+    if(create){
+      if(snap.exists) return $("err").textContent = "Ese usuario ya existe.";
+      const salt = crypto.getRandomValues(new Uint32Array(4)).join("-");
+      const d = {name, salt, hash: await sha(salt+pw), total:0};
+      ACCIONES.forEach((_,i)=>d["a"+i]=0);
+      await ref.set(d); setMe(name, d);
+    } else {
+      if(!snap.exists) return $("err").textContent = "Usuario no encontrado.";
+      const d = snap.data();
+      if(await sha(d.salt+pw) !== d.hash) return $("err").textContent = "Contraseña incorrecta.";
+      setMe(name, d);
+    }
+  }catch(e){ $("err").textContent = "Error: "+(e&&e.code||e); }
+}
+
+function setMe(name, d){
+  me = name; myData = d; save("gw_user", name);
+  $("auth").classList.add("hide"); $("game").classList.remove("hide");
+  $("who").replaceChildren(el("span","👤 "+name,"mut"));
+  const out = el("button","Salir"); out.onclick = ()=>{ save("gw_user",null); location.reload(); };
+  $("who").append(out); renderMine();
+}
+function renderMine(){
+  $("mine").textContent = "Tus acciones: "+(myData.total||0)+" en total · "+ACCIONES.map((a,i)=>a+": "+(myData["a"+i]||0)).join(" · ");
+}
+
+async function doAction(i){
+  if(!char) return $("msg").textContent = "Primero elige un personaje.";
+  try{
+    const ref = players.doc(me), d = (await ref.get()).data();
+    const upd = {total:(d.total||0)+1, ["a"+i]:(d["a"+i]||0)+1};
+    await ref.update(upd);
+    myData = {...d, ...upd}; renderMine();
+    $("msg").textContent = "✅ "+char.n+": "+ACCIONES[i]+" (+1)";
+  }catch(e){ $("msg").textContent = "No se pudo guardar: "+(e&&e.code||e); }
+}
+
+function fill(ol, key){
+  const rows = all.filter(x=>(x[key]||0)>0).sort((a,b)=>(b[key]||0)-(a[key]||0)).slice(0,10);
+  ol.replaceChildren();
+  if(!rows.length){ ol.replaceChildren(el("li","Todavía nadie.","mut")); return; }
+  rows.forEach((r,n)=>{ const li = el("li", (n<3?["🥇","🥈","🥉"][n]+" ":"")+(r.name||r.id)); li.append(el("span", r[key])); ol.append(li); });
+}
+function renderTops(){ fill($("topT"),"total"); fill($("topA"),"a"+$("sel").value); }
+
+init();
+</script>
+</body>
+</html>
